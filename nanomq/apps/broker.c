@@ -207,6 +207,19 @@ static nng_optspec cmd_opts[] = {
 // so that we can use this to set the timeout to the correct value for
 // use in poll.
 
+static int
+broker_dispatch(nano_work *work, uint32_t pipe, nng_msg *msg)
+{
+	int rv = nng_nmq_broker_send(work->ctx, pipe, msg);
+
+	if (rv != 0) {
+		nng_msg_free(msg);
+		log_error("broker dispatch to pipe %u failed: %s", pipe,
+		    nng_strerror(rv));
+	}
+	return (rv);
+}
+
 void
 server_cb(void *arg)
 {
@@ -418,9 +431,8 @@ server_cb(void *arg)
 						}
 						if (encode_pub_message(rmsg, work, PUBLISH)) {
 							nng_mqtt_msg_set_sub_retain_bool(rmsg, true);
-							nng_aio_set_msg(work->aio, rmsg);
-							nng_aio_set_prov_data(work->aio, &work->pid.id);
-							nng_ctx_send(work->ctx, work->aio);
+							(void) broker_dispatch(
+							    work, work->pid.id, rmsg);
 						} else
 							log_warn("encode retain msg failed!");
 					} else {
@@ -436,11 +448,9 @@ server_cb(void *arg)
 				cvector_free(work->msg_ret);
 			}
 			nng_msg_set_cmd_type(smsg, CMD_SUBACK);
-			nng_aio_set_prov_data(work->aio, &work->pid.id);
-			nng_aio_set_msg(work->aio, smsg);
 			work->msg   = NULL;
 			work->state = SEND;
-			nng_ctx_send(work->ctx, work->aio);
+			(void) broker_dispatch(work, work->pid.id, smsg);
 			smsg = NULL;
 			nng_aio_finish(work->aio, 0);
 			// free conn_param in SEND state
@@ -463,11 +473,10 @@ server_cb(void *arg)
 
 			// free unsub_pkt
 			unsub_pkt_free(work->unsub_pkt);
-			nng_aio_set_prov_data(work->aio, &work->pid.id);
-			nng_aio_set_msg(work->aio, work->msg);
+			smsg        = work->msg;
 			work->msg   = NULL;
 			work->state = SEND;
-			nng_ctx_send(work->ctx, work->aio);
+			(void) broker_dispatch(work, work->pid.id, smsg);
 			smsg = NULL;
 			nng_aio_finish(work->aio, 0);
 			//free conn_param in SEND state
@@ -517,11 +526,10 @@ server_cb(void *arg)
 			uint8_t  reason_code = *(body + 1);
 			if (work->proto == PROTO_MQTT_BROKER) {
 				// Return CONNACK to clients of broker
-				nng_aio_set_prov_data(work->aio, &work->pid.id);
 				// clone for sending connect event notification
 				nng_msg_clone(work->msg);
-				nng_aio_set_msg(work->aio, work->msg);
-				nng_ctx_send(work->ctx, work->aio);
+				(void) broker_dispatch(
+				    work, work->pid.id, work->msg);
 				smsg = nano_msg_notify(work->cparam, reason_code, 0, true);
 			} else {
 				smsg = nano_msg_notify(work->cparam, reason_code, 1, true);
@@ -599,10 +607,7 @@ server_cb(void *arg)
 					msg_info = &msg_infos[i];
 					nng_msg_clone(smsg);
 					work->pid.id = msg_info->pipe;
-					nng_aio_set_prov_data(work->aio, &work->pid.id);
-					work->msg = smsg;
-					nng_aio_set_msg(work->aio, work->msg);
-					nng_ctx_send(work->ctx, work->aio);
+					rv = broker_dispatch(work, work->pid.id, smsg);
 				}
 			}
 		work->msg = smsg;
@@ -737,10 +742,8 @@ server_cb(void *arg)
 						msg_info = &msg_infos[i];
 						nng_msg_clone(smsg);
 						work->pid.id = msg_info->pipe;
-						nng_aio_set_prov_data(work->aio, &work->pid.id);
-						work->msg = smsg;
-						nng_aio_set_msg(work->aio, work->msg);
-						nng_ctx_send(work->ctx, work->aio);
+						(void) broker_dispatch(
+						    work, work->pid.id, smsg);
 					}
 			hook_entry(work, 0);
 			nng_msg_free(smsg);
@@ -809,10 +812,8 @@ server_cb(void *arg)
 		nng_msg_free(work->msg);
 		work->msg = smsg;
 		// compose a disconnect msg
-		nng_aio_set_prov_data(work->aio, &work->pid.id);
-		// clone for sending connect event notification
-		nng_aio_set_msg(work->aio, work->msg);
-		nng_ctx_send(work->ctx, work->aio);
+		(void) broker_dispatch(work, work->pid.id, work->msg);
+		work->msg = NULL;
 
 		// clear reason code
 		work->code = SUCCESS;
