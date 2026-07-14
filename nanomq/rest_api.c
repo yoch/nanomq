@@ -1788,9 +1788,15 @@ get_prometheus(http_msg *msg, kv **params, size_t param_num,
 	stats.subscribers      = dbhash_get_pipe_cnt();
 	stats.topics           = get_topics_count();
 #ifdef STATISTICS
+	uint64_t transport_dropped = 0;
+	uint64_t transport_sent    = 0;
+	(void) nng_socket_get_uint64(*broker_sock,
+	    NMQ_OPT_MQTT_MSGS_DROPPED, &transport_dropped);
+	(void) nng_socket_get_uint64(
+	    *broker_sock, NMQ_OPT_MQTT_MSGS_SENT, &transport_sent);
 	stats.message_received = nanomq_get_message_in();
-	stats.message_sent     = nanomq_get_message_out();
-	stats.message_dropped  = nanomq_get_message_drop();
+	stats.message_sent     = transport_sent;
+	stats.message_dropped  = nanomq_get_message_drop() + transport_dropped;
 #endif
 
 #if NANO_PLATFORM_LINUX

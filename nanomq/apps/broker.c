@@ -1038,6 +1038,11 @@ broker(conf *nanomq_conf)
 	if (rv != 0) {
 		NANO_NNG_FATAL("nng_nmq_tcp0_open", rv);
 	}
+	rv = nng_socket_set_bool(sock, NMQ_OPT_MQTT_LOG_DROPS,
+	    nanomq_conf->log_dropped_messages);
+	if (rv != 0) {
+		NANO_NNG_FATAL("NMQ_OPT_MQTT_LOG_DROPS", rv);
+	}
 	log_debug("listener init finished");
 
 	// HTTP Service
